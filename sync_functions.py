@@ -4,6 +4,9 @@ import os
 import zipfile
 import tempfile
 import hashlib
+
+from pyzotero.zotero import Zotero
+
 import rmapi_shim as rmapi
 import remarks
 from pathlib import Path
