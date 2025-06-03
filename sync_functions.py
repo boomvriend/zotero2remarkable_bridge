@@ -4,6 +4,7 @@ import os
 import zipfile
 import tempfile
 import hashlib
+from pprint import pprint
 
 from pyzotero.zotero import Zotero
 
@@ -13,7 +14,6 @@ from pathlib import Path
 from shutil import rmtree
 from time import sleep
 from datetime import datetime
-
 
 logger = logging.getLogger("zotero_rM_bridge.sync_functions")
 
@@ -28,7 +28,7 @@ def sync_to_rm(item, zot, webdav, folders):
             attachment_id = attachments[attachments.index(entry)]["key"]
             attachment_name = zot.item(attachment_id)["data"]["filename"]
             logger.info(f"Processing {attachment_name}...")
-                
+
             # Get actual file and repack it in reMarkable's file format
             file_name = temp_path / attachment_name
             if webdav:
@@ -88,6 +88,39 @@ def download_from_rm(entity: str, folder: str) -> Path:
     rmtree(unzip_path)
 
     return Path(temp_path / pdf_name)
+
+
+def zotero_upload(pdf_path: Path, zot: Zotero):
+    md_name = f"{pdf_path.stem} _obsidian.md"
+    md_path = pdf_path.with_name(md_name)
+
+    annotated_name = f"(Annotated) {pdf_path.stem}{pdf_path.suffix}"
+    annotated_path = pdf_path.with_name(annotated_name)
+    logging.info(f"Have an annotated PDF {str(pdf_path)} to upload")
+
+    pdf_path.rename(str(annotated_path) + ".pdf")
+
+    for item in zot.items(tag="synced"):
+        item_id = item["key"]
+        item_name = item.get("data", {}).get("title") or item_id
+        for attachment in zot.children(item_id):
+            if attachment["data"].get("filename", "") == pdf_path.name:
+                files_to_upload = [str(annotated_path)]
+                if md_path.exists():
+                    files_to_upload.append(str(md_path))
+
+                upload = zot.attachment_simple(files_to_upload, item_id)
+                if upload.get("success") or upload.get('unchanged'):
+                    logging.info(f"{pdf_path} attached to Zotero item '{item_name}'.")
+                    zot.add_tags(item, ["read", "annotated"])
+                else:
+                    logging.warning(f"Uploading {pdf_path} to Zotero item '{item_name}' failed")
+                    logging.warning(f"Reason for upload failure: {upload.get('failure')}")
+                return
+
+    logging.warning(
+        f"Have an annotated PDF '{annotated_name}' to upload, but cannot find the appropriate item in Zotero")
+
 
 def get_md5(pdf) -> None | str:
     if pdf.is_file():
@@ -192,5 +225,5 @@ def get_sync_status(zot):
         for attachment in zot.children(item["key"]):
             if "contentType" in attachment["data"] and attachment["data"]["contentType"] == "application/pdf":
                 read_list.append(attachment["data"]["filename"])
-    
+
     return read_list
