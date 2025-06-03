@@ -101,10 +101,11 @@ def zotero_upload(pdf_path: Path, zot: Zotero):
     pdf_path.rename(str(annotated_path) + ".pdf")
 
     for item in zot.items(tag="synced"):
+        already_uploaded_annotation = len([1 for tag in item["data"].get('tags') if tag["tag"] == "annotated"]) > 0
         item_id = item["key"]
         item_name = item.get("data", {}).get("title") or item_id
         for attachment in zot.children(item_id):
-            if attachment["data"].get("filename", "") == pdf_path.name:
+            if attachment["data"].get("filename", "") == pdf_path.name and not already_uploaded_annotation:
                 files_to_upload = [str(annotated_path)]
                 if md_path.exists():
                     files_to_upload.append(str(md_path))
@@ -112,10 +113,12 @@ def zotero_upload(pdf_path: Path, zot: Zotero):
                 upload = zot.attachment_simple(files_to_upload, item_id)
                 if upload.get("success") or upload.get('unchanged'):
                     logging.info(f"{pdf_path} attached to Zotero item '{item_name}'.")
-                    zot.add_tags(item, ["read", "annotated"])
-                else:
+                    zot.add_tags(item, "annotated")
+                elif already_uploaded_annotation:
                     logging.warning(f"Uploading {pdf_path} to Zotero item '{item_name}' failed")
                     logging.warning(f"Reason for upload failure: {upload.get('failure')}")
+                return
+            elif already_uploaded_annotation:
                 return
 
     logging.warning(
