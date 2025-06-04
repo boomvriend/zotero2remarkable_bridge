@@ -181,46 +181,58 @@ def webdav_uploader(pdf_name, item_id, zot, webdav):
     '''
     temp_path = Path(tempfile.gettempdir())
     item_template = zot.item_template("attachment", "imported_file")
-    filled_item_template = fill_template(item_template, pdf_name)
-    create_attachment = zot.create_items([filled_item_template], item_id)
-    
-    if create_attachment["success"]:
-        key = create_attachment["success"]["0"]
-    else:
-        logging.info("Failed to create attachment, aborting...")
-    
-    attachment_zip = temp_path / f"{key}.zip"
-    with zipfile.ZipFile(attachment_zip, "w") as zf:
-        zf.write(pdf_name, arcname=pdf_name.name)
-    remote_attachment_zip = attachment_zip.name
-    
-    attachment_upload = webdav_uploader(webdav, remote_attachment_zip, attachment_zip)
-    if attachment_upload:
-        logging.info("Attachment upload successful, proceeding...")
-    else:
-        logging.error("Failed uploading attachment, skipping...")
+    for item in zot.items(tag=["synced", "-read"]):
+        item_id = item["key"]
+        for attachment in zot.children(item_id):
+            if "filename" in attachment["data"] and attachment["data"]["filename"] == str(pdf_name):
+                pdf_name = temp_path / pdf_name
+                new_pdf_name = pdf_name.with_stem(f"(Annot) {pdf_name.stem}")
+                pdf_name.rename(new_pdf_name)
+                pdf_name = new_pdf_name
+                filled_item_template = fill_template(item_template, pdf_name)
+                create_attachment = zot.create_items([filled_item_template], item_id)
 
-    """For the file to be properly recognized in Zotero, a propfile needs to be
-    uploaded to the same folder with the same ID. The content needs 
-    to match exactly Zotero's format."""
-    propfile_content = f'<properties version="1"><mtime>{item_template["mtime"]}</mtime><hash>{item_template["md5"]}</hash></properties>'
-    propfile = temp_path / f"{key}.prop"
-    with open(propfile, "w") as pf:
-        pf.write(propfile_content)
-    remote_propfile = f"{key}.prop"
-    
-    propfile_upload = webdav_uploader_old(webdav, remote_propfile, propfile)
-    if propfile_upload:
-        logging.info("Propfile upload successful, proceeding...")
-    else:
-        logging.error("Propfile upload failed, skipping...")
-                
-    zot.delete_tags(item, "/read")
-    logging.info(f"{pdf_name.name} uploaded to Zotero.")
-    (temp_path / pdf_name).unlink()
-    (temp_path / attachment_zip).unlink()
-    (temp_path / propfile).unlink()
-    return pdf_name
+                if create_attachment["success"]:
+                    key = create_attachment["success"]["0"]
+                else:
+                    logging.info("Failed to create attachment, aborting...")
+                    continue
+
+                attachment_zip = temp_path / f"{key}.zip"
+                with zipfile.ZipFile(attachment_zip, "w") as zf:
+                    zf.write(pdf_name, arcname=pdf_name.name)
+                remote_attachment_zip = attachment_zip.name
+
+                attachment_upload = webdav_uploader(webdav, remote_attachment_zip, attachment_zip)
+                if attachment_upload:
+                    logging.info("Attachment upload successful, proceeding...")
+                else:
+                    logging.error("Failed uploading attachment, skipping...")
+                    continue
+
+                """For the file to be properly recognized in Zotero, a propfile needs to be
+                uploaded to the same folder with the same ID. The content needs 
+                to match exactly Zotero's format."""
+                propfile_content = f'<properties version="1"><mtime>{item_template["mtime"]}</mtime><hash>{item_template["md5"]}</hash></properties>'
+                propfile = temp_path / f"{key}.prop"
+                with open(propfile, "w") as pf:
+                    pf.write(propfile_content)
+                remote_propfile = f"{key}.prop"
+
+                propfile_upload = webdav_uploader(webdav, remote_propfile, propfile)
+                if propfile_upload:
+                    logging.info("Propfile upload successful, proceeding...")
+                else:
+                    logging.error("Propfile upload failed, skipping...")
+                    continue
+
+                zot.add_tags(item, "read")
+                logging.info(f"{pdf_name.name} uploaded to Zotero.")
+                (temp_path / pdf_name).unlink()
+                (temp_path / attachment_zip).unlink()
+                (temp_path / propfile).unlink()
+                return pdf_name
+
 
 def get_sync_status(zot):
     read_list = []

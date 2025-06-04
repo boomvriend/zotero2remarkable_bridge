@@ -7,6 +7,7 @@ from tqdm import tqdm
 from config_functions import *
 from sync_functions import *
 from time import sleep
+from time import sleep
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -73,13 +74,5 @@ def main(argv):
     except Exception as e:
         logger.exception(e)
         
-# Detect if running in debug mode (e.g., from VS Code)
-if os.getenv("VSCODE_DEBUG", "1") == "1":
-    # Manually set sys.argv to avoid issues with script path containing spaces
-    sys.argv = [
-        "zotero2remarkable_bridge.py",  # or any dummy script name
-        "-m",
-        "push"
-    ]
 
 main(sys.argv[1:])
