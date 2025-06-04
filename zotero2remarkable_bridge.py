@@ -6,6 +6,7 @@ from pyzotero.zotero import Zotero
 from tqdm import tqdm
 from config_functions import *
 from sync_functions import *
+from time import sleep
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -19,10 +20,13 @@ def push(zot: Zotero, webdav: bool, folders):
         logger.info(f"Found {len(sync_items)} PDF attachments on the zotero to sync...")
         for item in tqdm(sync_items):
             if webdav:
-                sync_to_rm_webdav(item, zot, webdav, folders)
+                modified = sync_to_rm_webdav(item, zot, webdav, folders)
+                if modified:
+                    zot.add_tags(item, "synced")
+                    sleep(5)
+                    zot.delete_tags("to_sync")
             else:
-                sync_to_rm(item, zot, folders)
-        zot.delete_tags("to_sync")
+                sync_to_rm(item, zot, folders) 
     else:
         logger.info("Nothing to sync from Zotero")
 
@@ -79,5 +83,13 @@ def main(argv):
     except Exception as e:
         logger.exception(e)
         
+# Detect if running in debug mode (e.g., from VS Code)
+if os.getenv("VSCODE_DEBUG", "1") == "1":
+    # Manually set sys.argv to avoid issues with script path containing spaces
+    sys.argv = [
+        "zotero2remarkable_bridge.py",  # or any dummy script name
+        "-m",
+        "pull"
+    ]
 
 main(sys.argv[1:])

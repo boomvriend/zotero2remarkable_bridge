@@ -42,6 +42,7 @@ def sync_to_rm(item, zot, folders):
 def sync_to_rm_webdav(item, zot, webdav, folders):
     temp_path = Path(tempfile.gettempdir())
     item_id = item["key"]
+    modified = False
     attachments = zot.children(item_id)
     for entry in attachments:
         if "contentType" in entry["data"] and entry["data"]["contentType"] == "application/pdf":
@@ -67,7 +68,7 @@ def sync_to_rm_webdav(item, zot, webdav, folders):
                 logger.warning("PDF not found in downloaded file. Filename might be different. Try renaming file in Zotero, sync and try again.")
                 break
             if uploader:
-                zot.add_tags(item, "synced")
+                modified = True
                 file_path.unlink()
                 rmtree(unzip_path)
                 logger.info(f"Uploaded {attachment_name} to reMarkable.")
@@ -75,7 +76,8 @@ def sync_to_rm_webdav(item, zot, webdav, folders):
                 logger.error(f"Failed to upload {attachment_name} to reMarkable.")
         else:
             logger.info("Found attachment, but it's not a PDF, skipping...")
-
+    
+    return modified
 
 def download_from_rm(entity: str, folder: str) -> Path:
     temp_path = Path(tempfile.gettempdir())
@@ -159,7 +161,7 @@ def zotero_upload_webdav(pdf_name, zot, webdav):
     for item in zot.items(tag=["synced", "-read"]):
         item_id = item["key"]
         for attachment in zot.children(item_id):
-            if "filename" in attachment["data"] and attachment["data"]["filename"] == pdf_name:
+            if "filename" in attachment["data"] and attachment["data"]["filename"] == str(pdf_name):
                 pdf_name = temp_path / pdf_name
                 new_pdf_name = pdf_name.with_stem(f"(Annot) {pdf_name.stem}")
                 pdf_name.rename(new_pdf_name)
@@ -201,15 +203,12 @@ def zotero_upload_webdav(pdf_name, zot, webdav):
                     logging.error("Propfile upload failed, skipping...")
                     continue
                             
-                zot.add_tags(item, "read")
+                zot.delete_tags(item, "/read")
                 logging.info(f"{pdf_name.name} uploaded to Zotero.")
                 (temp_path / pdf_name).unlink()
                 (temp_path / attachment_zip).unlink()
                 (temp_path / propfile).unlink()
                 return pdf_name
-            return None
-        return None
-    return None
 
 
 def get_sync_status(zot):
