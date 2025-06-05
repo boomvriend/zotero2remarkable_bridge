@@ -14,10 +14,11 @@ from datetime import datetime
 
 logger = logging.getLogger("zotero_rM_bridge.sync_functions")
 
-def sync_to_rm(item, zot, folders):
+def sync_to_rm(item, zot, webdav, folders):
     temp_path = Path(tempfile.gettempdir())
     item_id = item["key"]
     attachments = zot.children(item_id)
+    modified = False
     logger.info(f"Syncing {len(attachments)} to reMarkable")
     for entry in attachments:
         if "contentType" in entry["data"] and entry["data"]["contentType"] == "application/pdf":
@@ -26,58 +27,37 @@ def sync_to_rm(item, zot, folders):
             logger.info(f"Processing {attachment_name}...")
                 
             # Get actual file and repack it in reMarkable's file format
-            zot.dump(attachment_id, path=temp_path)
             file_name = temp_path / attachment_name
+            if webdav:
+                webdav_downloader(webdav, attachment_id, attachment_name, temp_path)
+            else:
+                zot.dump(attachment_id, path=temp_path)
+            
             if file_name:
                 if rmapi.upload_file(file_name, f"/Zotero/{folders['unread']}"):
-                    zot.add_tags(item, "synced")
+                    modified = True #prevent change multiple times on parent item, in case of a zot.parent with multiple children 
                     os.remove(file_name)
                     logger.info(f"Uploaded {attachment_name} to reMarkable.")
                 else:
                     logger.error(f"Failed to upload {attachment_name} to reMarkable.")
         else:
             logger.warning("Found attachment, but it's not a PDF, skipping...")
-        
-       
-def sync_to_rm_webdav(item, zot, webdav, folders):
-    temp_path = Path(tempfile.gettempdir())
-    item_id = item["key"]
-    modified = False
-    attachments = zot.children(item_id)
-    for entry in attachments:
-        if "contentType" in entry["data"] and entry["data"]["contentType"] == "application/pdf":
-            attachment_id = attachments[attachments.index(entry)]["key"]
-            attachment_name = zot.item(attachment_id)["data"]["filename"]
-            logger.info(f"Processing {attachment_name}...")
     
-            # Get actual file from webdav, extract it and repack it in reMarkable's file format
-            file_name = f"{attachment_id}.zip"
-            file_path = Path(temp_path / file_name)
-            unzip_path = Path(temp_path / f"{file_name}-unzipped")
-            webdav.download_sync(remote_path=file_name, local_path=file_path)
-            with zipfile.ZipFile(file_path) as zf:
-                zf.extractall(unzip_path)
-                zf.extractall(".")
-            if (unzip_path / attachment_name ).is_file():
-                uploader = rmapi.upload_file(str(unzip_path / attachment_name), f"/Zotero/{folders['unread']}")
-            else:
-                """ #TODO: Sometimes Zotero does not seem to rename attachments properly,
-                    leading to reported file names diverging from the actual one. 
-                    To prevent this from stopping the whole program due to missing
-                    file errors, skip that file. Probably it could be worked around better though.""" 
-                logger.warning("PDF not found in downloaded file. Filename might be different. Try renaming file in Zotero, sync and try again.")
-                break
-            if uploader:
-                modified = True
-                file_path.unlink()
-                rmtree(unzip_path)
-                logger.info(f"Uploaded {attachment_name} to reMarkable.")
-            else:
-                logger.error(f"Failed to upload {attachment_name} to reMarkable.")
-        else:
-            logger.info("Found attachment, but it's not a PDF, skipping...")
-    
-    return modified
+    if modified:
+        zot.add_tags(item, "synced")
+        zot.delete_tags("to_sync") #this function has no item specific counterpart???
+
+def webdav_downloader(webdav, attachment_id, attachment_name, path):
+    '''
+    mimics zot.dump behavior for webdav
+    '''
+    file_path = (path / f"{attachment_id}.zip")
+    webdav.download_sync(remote_path=f"{attachment_id}.zip", local_path=file_path)
+    with zipfile.ZipFile(file_path) as zf:
+        zf.extractall(path)
+        zf.extractall(".")
+    if (path / attachment_name ).is_file():
+        file_path.unlink()
 
 def download_from_rm(entity: str, folder: str) -> Path:
     temp_path = Path(tempfile.gettempdir())

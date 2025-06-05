@@ -19,14 +19,7 @@ def push(zot: Zotero, webdav: bool, folders):
     if sync_items:
         logger.info(f"Found {len(sync_items)} PDF attachments on the zotero to sync...")
         for item in tqdm(sync_items):
-            if webdav:
-                modified = sync_to_rm_webdav(item, zot, webdav, folders)
-                if modified:
-                    zot.add_tags(item, "synced")
-                    sleep(5)
-                    zot.delete_tags("to_sync")
-            else:
-                sync_to_rm(item, zot, folders) 
+            sync_to_rm(item, zot, webdav, folders) 
     else:
         logger.info("Nothing to sync from Zotero")
 
@@ -89,7 +82,7 @@ if os.getenv("VSCODE_DEBUG", "1") == "1":
     sys.argv = [
         "zotero2remarkable_bridge.py",  # or any dummy script name
         "-m",
-        "pull"
+        "push"
     ]
 
 main(sys.argv[1:])
