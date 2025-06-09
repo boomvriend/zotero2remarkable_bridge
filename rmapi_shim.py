@@ -6,11 +6,7 @@ import logging
 from typing import List
 
 logger = logging.getLogger("zotero_rM_bridge.rmapi")
-
-BASE_DIR = os.path.abspath(os.path.join(__file__, '../'))
-rmapi_location = os.path.join(BASE_DIR, "rmapi")
-
-
+rmapi_location = "rmapi" # Added to path
 
 def check_rmapi():
     check = subprocess.run([rmapi_location, "ls"], capture_output=True, text=True)
