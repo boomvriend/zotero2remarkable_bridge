@@ -30,11 +30,8 @@ def pull(zot: Zotero, webdav: bool, read_folder: str):
     if files_list:
         logger.info(f"There are {len(files_list)} files to download from the reMarkable")
         for entity in tqdm(files_list):
-            pdf_name = download_from_rm(entity, read_folder)
-            if webdav:
-                zotero_upload_webdav(pdf_name, zot, webdav)
-            else:
-                zotero_upload(pdf_name, zot)
+            pdf_path = download_from_rm(entity, read_folder)
+            zotero_upload(pdf_path, zot, webdav)
     else:
         logger.info("No files ")
 
