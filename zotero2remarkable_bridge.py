@@ -21,10 +21,8 @@ def push(zot: Zotero, webdav: bool, folders):
         logger.info(f"Found {len(sync_items)} PDF attachments on the zotero to sync...")
         for item in tqdm(sync_items):
             sync_to_rm(item, zot, webdav, folders) 
-            sync_to_rm(item, zot, webdav, folders) 
     else:
         logger.info("Nothing to sync from Zotero")
-
 
 def pull(zot: Zotero, webdav: bool, read_folder: str):
     logger.info("Syncing from reMarkable to Zotero")

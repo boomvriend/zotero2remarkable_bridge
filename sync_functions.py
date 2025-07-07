@@ -99,16 +99,7 @@ def get_md5(pdf) -> None | str:
 def get_mtime() -> str:
     return datetime.now().strftime('%s')
 
-
-def fill_template(item_template, pdf_name):
-    item_template["title"] = pdf_name.stem
-    item_template["filename"] = pdf_name.name
-    item_template["md5"] = get_md5(pdf_name)
-    item_template["mtime"] = get_mtime()
-    return item_template
-
-
-def webdav_uploader_old(webdav, remote_path, local_path):
+def webdav_uploader(webdav, remote_path, local_path):
     for i in range(3):
         try:
             webdav.upload_sync(remote_path=remote_path, local_path=local_path)
@@ -119,7 +110,7 @@ def webdav_uploader_old(webdav, remote_path, local_path):
     else:
         return False
 
-def zotero_upload(pdf_path: Path, zot: Zotero):
+def zotero_upload(pdf_path: Path, zot: Zotero, webdav):
     md_name = f"{pdf_path.stem} _obsidian.md"
     md_path = pdf_path.with_name(md_name)
 
@@ -127,79 +118,105 @@ def zotero_upload(pdf_path: Path, zot: Zotero):
     annotated_path = pdf_path.with_name(annotated_name)
     logging.info(f"Have an annotated PDF {str(pdf_path)} to upload")
 
-    pdf_path.rename(str(annotated_path) + ".pdf")
+    pdf_path.rename(str(annotated_path))
 
-    for item in zot.items(tag="synced"):
-        already_uploaded_annotation = len([1 for tag in item["data"].get('tags') if tag["tag"] == "annotated"]) > 0
+    for item in zot.items(tag="synced"): #loop over all times with synced tag in zotero
         item_id = item["key"]
         item_name = item.get("data", {}).get("title") or item_id
-        for attachment in zot.children(item_id):
-            if attachment["data"].get("filename", "") == pdf_path.name and not already_uploaded_annotation:
-                files_to_upload = [str(annotated_path)]
-                if md_path.exists():
-                    files_to_upload.append(str(md_path))
-
-                upload = zot.attachment_simple(files_to_upload, item_id)
-                if upload.get("success") or upload.get('unchanged'):
-                    logging.info(f"{pdf_path} attached to Zotero item '{item_name}'.")
-                    zot.add_tags(item, "annotated")
+        uploaded = False
+        for attachment in zot.children(item_id): #loop over all attachements of a zotero entry a.k.a item
+            if attachment["data"].get("filename", "") == pdf_path.name:
+                already_uploaded_annotation = len([1 for tag in attachment["data"].get('tags') if tag["tag"] == "annotated"]) > 0
+                if not already_uploaded_annotation:
+                    files_to_upload = [str(annotated_path)]
+                    if md_path.exists():
+                        files_to_upload.append(str(md_path))
+                    #distinction between webdav and non webdav
+                    if webdav:
+                        upload = add_to_zotero(files_to_upload, item_id, zot, webdav)
+                    else:
+                        upload = zot.attachment_simple(files_to_upload, item_id)
+                        
+                    if upload.get("success") or upload.get('unchanged'):
+                        zot.add_tags(attachment, "annotated")
+                        logging.info(f"{pdf_path} attached to Zotero item '{item_name}'.")
+                        return
+                    else:
+                        logging.warning(f"Reason for upload failure: {upload.get('failure')}")
+                        return
+                        
                 elif already_uploaded_annotation:
-                    logging.warning(f"Uploading {pdf_path} to Zotero item '{item_name}' failed")
-                    logging.warning(f"Reason for upload failure: {upload.get('failure')}")
-                return
-            elif already_uploaded_annotation:
-                return
+                    logging.warning(f"Uploading {pdf_path} to Zotero item '{item_name}' failed.\nAlready uploaded annotation.")
+                    return
 
     logging.warning(f"Have an annotated PDF '{annotated_name}' to upload, but cannot find the appropriate item in Zotero")
 
 
-def webdav_uploader(pdf_name, item_id, zot, webdav):
+def add_to_zotero(pdf_names, item_id, zot, webdav):
     '''
     mimics zot.attachment_simple behavior for webdav
     returns dictionary with an key "succes" with True or False
     '''
-    temp_path = Path(tempfile.gettempdir())
-    item_template = zot.item_template("attachment", "imported_file")
-    filled_item_template = fill_template(item_template, pdf_name)
-    create_attachment = zot.create_items([filled_item_template], item_id)
-    
-    if create_attachment["success"]:
-        key = create_attachment["success"]["0"]
-    else:
-        logging.info("Failed to create attachment, aborting...")
-    
-    attachment_zip = temp_path / f"{key}.zip"
-    with zipfile.ZipFile(attachment_zip, "w") as zf:
-        zf.write(pdf_name, arcname=pdf_name.name)
-    remote_attachment_zip = attachment_zip.name
-    
-    attachment_upload = webdav_uploader(webdav, remote_attachment_zip, attachment_zip)
-    if attachment_upload:
-        logging.info("Attachment upload successful, proceeding...")
-    else:
-        logging.error("Failed uploading attachment, skipping...")
 
-    """For the file to be properly recognized in Zotero, a propfile needs to be
-    uploaded to the same folder with the same ID. The content needs 
-    to match exactly Zotero's format."""
-    propfile_content = f'<properties version="1"><mtime>{item_template["mtime"]}</mtime><hash>{item_template["md5"]}</hash></properties>'
-    propfile = temp_path / f"{key}.prop"
-    with open(propfile, "w") as pf:
-        pf.write(propfile_content)
-    remote_propfile = f"{key}.prop"
+    temp_path = Path(tempfile.gettempdir())
+    result = {'success' : True, 'failure': "WebDAV couldn't upload it."}
+    #prepare and add zotero item entries
+    pdf_paths = [Path(pdf_name) for pdf_name in pdf_names] #we only ask for pdf names because then it is similar to zotero.attach_simple but we convert back here to path
+    item_templates = [None] * len(pdf_names) 
+    for i in range(len(pdf_paths)):
+        # fill in the item template
+        item_templates[i] = zot.item_template("attachment", "imported_file")
+        item_templates[i]["title"] = pdf_paths[i].stem
+        item_templates[i]["filename"] = pdf_paths[i].name
+        item_templates[i]["md5"] = get_md5(pdf_paths[i])
+        item_templates[i]["mtime"] = datetime.now().strftime('%s')
     
-    propfile_upload = webdav_uploader_old(webdav, remote_propfile, propfile)
-    if propfile_upload:
-        logging.info("Propfile upload successful, proceeding...")
-    else:
-        logging.error("Propfile upload failed, skipping...")
-                
-    zot.delete_tags(item, "/read")
-    logging.info(f"{pdf_name.name} uploaded to Zotero.")
-    (temp_path / pdf_name).unlink()
-    (temp_path / attachment_zip).unlink()
-    (temp_path / propfile).unlink()
-    return pdf_name
+        #create a zotero item (Maybe overlap with zot.attachment_simple)
+        create_attachment = zot.create_items([item_templates[i]], item_id)
+        if create_attachment["success"]:
+            key = create_attachment["success"]["0"]
+        else:
+            result['success'] = False
+            logging.info("Failed to create attachment, aborting...")
+            return result
+
+        #create zip for webdav storage
+        attachment_zip = temp_path / f"{key}.zip"
+        with zipfile.ZipFile(attachment_zip, "w") as zf:
+            zf.write(pdf_paths[i], arcname=pdf_paths[i].name)
+        remote_attachment_zip = attachment_zip.name
+
+        #upload it to webdav
+        attachment_upload = webdav_uploader(webdav, remote_attachment_zip, attachment_zip)
+        if attachment_upload:
+            logging.info("Attachment upload successful, proceeding...")
+        else:
+            result['success'] = False
+            logging.error("Failed uploading attachment, skipping...")
+
+        #For the file to be properly recognized in Zotero, a propfile needs to be
+        #uploaded to the same folder with the same ID. The content needs 
+        #to match exactly Zotero's format.
+        propfile_content = f'<properties version="1"><mtime>{item_templates[i]["mtime"]}</mtime><hash>{item_templates[i]["md5"]}</hash></properties>'
+        propfile = temp_path / f"{key}.prop"
+        with open(propfile, "w") as pf:
+            pf.write(propfile_content)
+        remote_propfile = f"{key}.prop"
+        
+        propfile_upload = webdav_uploader(webdav, remote_propfile, propfile)
+        if propfile_upload:
+            logging.info("Propfile upload successful, proceeding...")
+        else:
+            result['success'] = False
+            logging.error("Propfile upload failed, skipping...")
+        
+        #clean up
+        logging.info(f"{pdf_paths[i].name} uploaded to Zotero.")
+        (pdf_paths[i]).unlink()
+        (temp_path / attachment_zip).unlink()
+        (temp_path / propfile).unlink()
+    
+    return result
 
 def get_sync_status(zot):
     read_list = []
